@@ -145,6 +145,10 @@ class CreditScoringPipeline:
         
         # Predict
         risk_prob = float(self.model.predict_proba(X)[0, 1])
+        
+        # Enforce minimum risk ratio of 0.1% (0.001)
+        risk_prob = max(0.001, risk_prob)
+        
         credit_score = compute_credit_score(risk_prob)
         credit_limit = compute_credit_limit(
             monthly_volume=row["monthly_volume"],

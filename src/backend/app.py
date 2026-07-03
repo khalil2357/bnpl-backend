@@ -61,6 +61,45 @@ def metrics():
     m = pipeline.get_metrics()
     return jsonify(m if m else {"message": "Model not trained yet"})
 
+import platform
+import psutil
+
+@app.route("/api/system_info", methods=["GET"])
+def system_info():
+    """Return hardware system info (CPU, RAM, Network) for both the process and global system."""
+    process = psutil.Process(os.getpid())
+    
+    # Process CPU
+    app_cpu = process.cpu_percent(interval=0.1)
+    # Global CPU
+    sys_cpu = psutil.cpu_percent(interval=0.1)
+    
+    # Process RAM (Resident Set Size)
+    mem_info = process.memory_info()
+    app_ram_mb = mem_info.rss / (1024 ** 2)
+    
+    # Global RAM
+    sys_mem = psutil.virtual_memory()
+    sys_ram_percent = sys_mem.percent
+    sys_ram_gb = sys_mem.used / (1024 ** 3)
+    sys_ram_total_gb = sys_mem.total / (1024 ** 3)
+    
+    # Network (Global)
+    net = psutil.net_io_counters()
+
+    return jsonify({
+        "os": platform.system(),
+        "app_cpu": f"{app_cpu:.1f}%",
+        "sys_cpu": f"{sys_cpu:.1f}%",
+        "app_ram": f"{app_ram_mb:.1f} MB",
+        "sys_ram": f"{sys_ram_gb:.1f} GB / {sys_ram_total_gb:.1f} GB",
+        "sys_ram_percent": f"{sys_ram_percent:.1f}%",
+        "gpu_percent": "0.0%",
+        "gpu_mem": "N/A (CPU-Only)",
+        "net_bytes_sent": net.bytes_sent,
+        "net_bytes_recv": net.bytes_recv
+    })
+
 
 @app.route("/api/predict", methods=["POST"])
 def predict():

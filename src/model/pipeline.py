@@ -95,32 +95,44 @@ class CreditScoringPipeline:
     
     def predict(self, input_data: dict) -> dict:
         """
-        Run inference on a single customer record.
+        Run inference on a single customer record by looking up their phone number in the hardcoded dataset.
         
         Args:
-            input_data: dict with keys:
-                - phone_number (str, optional)
-                - total_transactions (int)
-                - monthly_volume (float)
-                - success_rate (float, 0–1)
-                - avg_gap_days (float)
-                - max_gap_days (float)
-                - insufficient_funds_count (int)
-                - merchant_category (str)
-                - late_payment_count (int)
-        
-        Returns:
-            dict with:
-                - risk_ratio (float, 0–1)
-                - credit_score (int, 300–850)
-                - risk_tier (str)
-                - max_credit_limit (float, BDT)
+            input_data: dict with key:
+                - phone_number (str)
         """
         if not self._loaded:
             self.load()
         
-        # Validate merchant category
-        merchant = input_data.get("merchant_category", "Grocery")
+        phone_number = input_data.get("phone_number")
+        if not phone_number:
+            raise ValueError("phone_number is required")
+
+        # Load the hardcoded dataset
+        data_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data.csv")
+        raw_df = pd.read_csv(data_file, dtype={"Phone Number": str})
+        
+        # Find the row
+        row_df = raw_df[raw_df["Phone Number"] == phone_number]
+        if row_df.empty:
+            raise ValueError(f"Phone number {phone_number} not found in the dataset.")
+            
+        raw_row = row_df.iloc[0]
+
+        # Extract features exactly as data_generator maps them
+        success_rate_raw = raw_row["Tx Success Rate (%)"]
+        if isinstance(success_rate_raw, str):
+            success_rate = float(success_rate_raw.rstrip("%")) / 100.0
+        else:
+            success_rate = float(success_rate_raw)
+            
+        monthly_spend_raw = raw_row["Monthly Spend (BDT)"]
+        if isinstance(monthly_spend_raw, str):
+            monthly_volume = float(monthly_spend_raw.replace('$', '').replace('৳', '').replace(',', ''))
+        else:
+            monthly_volume = float(monthly_spend_raw)
+
+        merchant = raw_row["Top Merchant Category"]
         if merchant not in MERCHANT_CATEGORIES:
             merchant = "Grocery"
         
@@ -128,15 +140,15 @@ class CreditScoringPipeline:
         encoded = self.encoder.transform([[merchant]])
         cat_cols = {f"cat_{c}": encoded[0][i] for i, c in enumerate(MERCHANT_CATEGORIES)}
         
-        # Build feature row
+        # Build feature row exactly matching the training schema
         row = {
-            "total_transactions": float(input_data.get("total_transactions", 50)),
-            "monthly_volume": float(input_data.get("monthly_volume", 10000)),
-            "success_rate": float(input_data.get("success_rate", 0.9)),
-            "avg_gap_days": float(input_data.get("avg_gap_days", 5)),
-            "max_gap_days": float(input_data.get("max_gap_days", 15)),
-            "insufficient_funds_count": float(input_data.get("insufficient_funds_count", 0)),
-            "late_payment_count": float(input_data.get("late_payment_count", 0)),
+            "total_transactions": float(raw_row["Merchant Count (30d)"]) * 5,
+            "monthly_volume": monthly_volume,
+            "success_rate": success_rate,
+            "avg_gap_days": float(raw_row["Avg Gap Days"]),
+            "max_gap_days": float(raw_row["Max Gap Days"]),
+            "insufficient_funds_count": float(raw_row["Insufficient Funds Count"]),
+            "late_payment_count": int(raw_row["Insufficient Funds Count"] // 2),
         }
         row.update(cat_cols)
         
@@ -159,7 +171,7 @@ class CreditScoringPipeline:
         )
         
         return {
-            "phone_number": input_data.get("phone_number", "N/A"),
+            "phone_number": phone_number,
             "risk_ratio": round(risk_prob, 6),
             "credit_score": credit_score,
             "risk_tier": get_risk_tier(credit_score),
